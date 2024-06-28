@@ -1,0 +1,249 @@
+---
+title: "Elevator Predictive Maintenance Model"
+author: "Namith"
+date: "2024-05-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(datasets) 
+library(dplyr)
+library(magrittr)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+
+vibration_raw <- read_csv("predictive-maintenance-dataset.csv")
+
+failure_raw <- read_csv("maintenance-failure-prediction-dataset.csv")
+
+# Add a new column "failure" based on the condition
+failure_raw$failure <- ifelse(failure_raw$`failure type` == "No failure", "no failure", "failure")
+
+
+
+```
+
+
+## Classification Tree for predictive maintenance failure
+
+```{r failureginivsentropy}
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Split the data into training (80%) and testing (20%) sets
+train_index <- sample(1:nrow(failure_raw), 0.8 * nrow(failure_raw))
+train_data <- failure_raw[train_index, ]
+test_data <- failure_raw[-train_index, ]
+
+# Train the model using Gini index on the training data
+rp_fit_gini <- rpart(failure ~ . - `failure type` - UID, data = train_data, parms = list(split = "gini"))
+
+# Train the model using entropy on the training data
+rp_fit_entropy <- rpart(failure ~ . - `failure type` - UID, data = train_data, parms = list(split = "information"))
+
+rpart.plot(rp_fit_gini)
+rpart.plot(rp_fit_entropy)
+
+# Predict using the models on the test data
+pred_gini_test <- predict(rp_fit_gini, test_data, type = "class")
+pred_entropy_test <- predict(rp_fit_entropy, test_data, type = "class")
+
+# Calculate accuracy for the model using Gini index on the test data
+accuracy_gini_test <- sum(pred_gini_test == test_data$failure) / length(test_data$failure)
+
+# Calculate accuracy for the model using entropy on the test data
+accuracy_entropy_test <- sum(pred_entropy_test == test_data$failure) / length(test_data$failure)
+
+# Print the accuracies on the test data
+accuracy_gini_test
+accuracy_entropy_test
+
+# Create confusion matrices for Gini and Entropy models
+conf_matrix_gini <- table(test_data$failure, pred_gini_test)
+conf_matrix_entropy <- table(test_data$failure, pred_entropy_test)
+
+# Print confusion matrix for Gini model
+cat("Confusion Matrix for Gini Model:\n")
+print(conf_matrix_gini)
+
+# Print confusion matrix for Entropy model
+cat("\nConfusion Matrix for Entropy Model:\n")
+print(conf_matrix_entropy)
+
+# Extract true positive (TP) and false negative (FN) counts for failure prediction
+tp_gini <- conf_matrix_gini[1, 1]
+fn_gini <- conf_matrix_gini[1, 2]
+
+tp_entropy <- conf_matrix_entropy[1, 1]
+fn_entropy <- conf_matrix_entropy[1, 2]
+
+# Calculate accuracy of failure prediction for Gini and Entropy models
+accuracy_failure_gini <- tp_gini / (tp_gini + fn_gini)
+accuracy_failure_entropy <- tp_entropy / (tp_entropy + fn_entropy)
+
+# Print accuracy of failure prediction for both models
+cat("Accuracy of Failure Prediction for Gini Model:", accuracy_failure_gini, "\n")
+cat("Accuracy of Failure Prediction for Entropy Model:", accuracy_failure_entropy, "\n")
+
+
+```
+
+
+
+
+
+## Regression tree for predictive maintenance
+
+```{r vibration}
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Split the data into training (80%) and testing (20%) sets
+train_index <- sample(1:nrow(vibration_raw), 0.8 * nrow(vibration_raw))
+train_data <- vibration_raw[train_index, ]
+test_data <- vibration_raw[-train_index, ]
+
+# Train the model using regression tree with cross-validation pruning on the training data
+rp_fit_regression <- rpart(vibration ~ ., data = train_data)
+
+# Predict vibration values using the model on the test data
+pred_vibration <- predict(rp_fit_regression, test_data)
+
+# Remove rows with NA values from test data and predictions
+complete_cases <- complete.cases(test_data)
+test_data <- test_data[complete_cases, ]
+pred_vibration <- pred_vibration[complete_cases]
+
+# Calculate the mean squared error (MSE) for the test predictions
+mse <- mean((test_data$vibration - pred_vibration)^2)
+
+# Print the mean squared error (MSE) as a measure of accuracy
+mse
+
+
+# Calculate the mean of the target variable from non-NA values in the training data
+baseline_prediction <- mean(train_data$vibration, na.rm = TRUE) 
+
+# Repeat the baseline prediction for all observations in the cleaned test data
+baseline_predictions <- rep(baseline_prediction, nrow(test_data))
+
+# Calculate the mean squared error (MSE) for the baseline mean predictions
+mse_baseline <- mean((test_data$vibration - baseline_predictions)^2, na.rm = TRUE)
+
+# Print the mean squared error (MSE) for the baseline mean model
+mse_baseline
+
+
+# Calculate the median of the target variable from non-NA values in the training data
+baseline_prediction <- median(train_data$vibration, na.rm = TRUE) 
+
+# Repeat the baseline prediction for all observations in the cleaned test data
+baseline_predictions <- rep(baseline_prediction, nrow(test_data))
+
+# Calculate the mean squared error (MSE) for the baseline median predictions
+mse_baseline <- mean((test_data$vibration - baseline_predictions)^2, na.rm = TRUE)
+
+# Print the mean squared error (MSE) for the baseline median model
+mse_baseline
+
+# Add predicted values to the test data
+test_data_with_preds <- test_data %>%
+  select(-ID) %>%
+  mutate(predicted_vibration = pred_vibration)
+
+
+# Repeat the baseline prediction for all observations in the cleaned test data
+baseline_predictions_mean <- rep(mean(train_data$vibration, na.rm = TRUE), nrow(test_data))
+
+# Calculate the mean squared error (MSE) for the baseline mean predictions
+mse_baseline_mean <- mean((test_data$vibration - baseline_predictions_mean)^2, na.rm = TRUE)
+
+# Add predicted values to the test data for the baseline mean model
+test_data_with_preds_mean <- test_data %>%
+  mutate(predicted_vibration_mean = baseline_predictions_mean)
+
+
+# Repeat the baseline prediction for all observations in the cleaned test data
+baseline_predictions_median <- rep(median(train_data$vibration, na.rm = TRUE), nrow(test_data))
+
+# Calculate the mean squared error (MSE) for the baseline median predictions
+mse_baseline_median <- mean((test_data$vibration - baseline_predictions_median)^2, na.rm = TRUE)
+
+# Add predicted values to the test data for the baseline median model
+test_data_with_preds_median <- test_data %>%
+  mutate(predicted_vibration_median = baseline_predictions_median)
+
+# Combine test data with predictions from all three models
+test_data_with_preds_all <- test_data %>%
+  mutate(predicted_vibration_mean = baseline_predictions_mean,
+         predicted_vibration_median = baseline_predictions_median,
+         predicted_vibration_original = pred_vibration)
+
+# Plot actual vs. predicted vibration for all three models
+plot_all <- ggplot(test_data_with_preds_all, aes(x = vibration, color = "Actual Vibration")) +
+  geom_point(aes(y = vibration), alpha = 0.5) +
+  geom_smooth(aes(y = predicted_vibration_mean, color = "Predicted Vibration (Mean)"), method = "lm", se = FALSE) +
+  geom_smooth(aes(y = predicted_vibration_median, color = "Predicted Vibration (Median)"), method = "lm", se = FALSE) +
+  geom_smooth(aes(y = predicted_vibration_original, color = "Predicted Vibration (Regression)"), method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Actual vs. Predicted Vibration",
+       x = "Actual Vibration",
+       y = "Vibration") +
+  scale_color_manual(values = c("Actual Vibration" = "black", 
+                                 "Predicted Vibration (Mean)" = "orange", 
+                                 "Predicted Vibration (Median)" = "red",
+                                 "Predicted Vibration (Regression)" = "blue"))
+
+# Print the plot for all three models
+print(plot_all)
+
+```
+
+
+
+## Analysis of the datasets
+
+```{r datasetanalysis}
+
+# Check the structure of the vibration_rawset
+glimpse(vibration_raw)
+
+# Summary of the vibration_rawset
+summary(vibration_raw)
+
+# Visualize the distribution of the vibration_raw
+vibration_raw %>%
+  gather(key = "sensor", value = "value", -vibration, -ID) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~sensor, scales = "free_x") +
+  theme_minimal() +
+  labs(title = "Distribution of Sensor Readings", x = "Value", y = "Frequency")
+
+# Check the structure of the failure dataset
+glimpse(failure_raw)
+
+# Summary of the failure dataset
+summary(failure_raw)
+
+# Select only numeric columns for the histogram
+numeric_cols <- failure_raw %>%
+  select_if(is.numeric)
+
+# Reshape data to long format for ggplot
+long_format_data <- numeric_cols %>%
+  gather(key = "sensor", value = "value")
+
+# Visualize the distribution of numeric sensor readings
+ggplot(long_format_data, aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~sensor, scales = "free_x") +
+  theme_minimal() +
+  labs(title = "Distribution of Sensor Readings in Failure Dataset", x = "Value", y = "Frequency")
+
+
+```
